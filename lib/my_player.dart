@@ -14,6 +14,7 @@ class MyPlayer {
   AudioPlayer player;
 
   MyPlayer() {
+    if (Platform.isIOS) AudioPlayer.setIosCategory(IosCategory.playback);
     player = AudioPlayer();
   }
 

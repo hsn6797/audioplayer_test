@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'my_player.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(MyApp());
@@ -42,37 +43,71 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   MyPlayer _mp;
   bool _progressBarActive = true;
 
-  Future<String> _loadFromAsset() async {
-    return await rootBundle.loadString("assets/01.json");
+  int _currentSelectedVerse = -1;
+
+  Future<bool> requestStoragePermission() async {
+    var status = await Permission.storage.request();
+    if (status.isGranted) {
+      return true;
+    }
+    return false;
   }
 
-  void parseJson() async {
-    String jsonString = await _loadFromAsset();
-    var data = jsonDecode(jsonString);
-    _verseList = await Verse.list(data['verses']);
+  Future<String> _loadFromAsset(String fileName) async {
+    return await rootBundle.loadString("assets/$fileName");
   }
 
-  void setAudioPlayer({download = false, fileName}) async {
-    setState(() {
-      _progressBarActive = true;
-    });
+  Future<dynamic> parseJson(String fileName) async {
+    String jsonString = await _loadFromAsset(fileName);
+    return jsonDecode(jsonString);
+//    _verseList = await Verse.list(data['verses']);
+  }
+
+  Future<void> setAudioPlayer(String url, {download = false, fileName}) async {
+    // Request Storage permission
+    if (!await requestStoragePermission()) return;
+
+    setState(() => _progressBarActive = true);
+
     _mp = MyPlayer();
+    await _mp.loadAudio(url, download: download, fileName: fileName);
+    if (_mp.audioFilePath == null) return;
 
-    await _mp.loadAudio(URL, download: download, fileName: fileName);
+    // Set the url
+    await _mp.setUpPlayer(_mp.audioFilePath);
 
-    if (_mp.audioFilePath != null) await _mp.setUpPlayer(_mp.audioFilePath);
+    setState(() => _progressBarActive = false);
 
-    setState(() {
-      _progressBarActive = false;
+    _mp.player.getPositionStream().listen((event) {
+      // Track the position
+      if (_mp.endPosition != null && event >= _mp.endPosition) {
+        setState(() {
+          _currentSelectedVerse++;
+          if (_currentSelectedVerse > 0 &&
+              _currentSelectedVerse < _verseList.length) {
+            _mp.startPosition =
+                _verseList[_currentSelectedVerse].arabic_start_time;
+            _mp.endPosition = _verseList[_currentSelectedVerse].urdu_end_time;
+          } else {
+            _currentSelectedVerse = -1;
+          }
+        });
+      }
     });
+  }
+
+  void setUpSura() async {
+    var data = await parseJson('01.json');
+    _verseList = await Verse.list(data['verses']);
+    await setAudioPlayer(URL, download: true, fileName: data['file_name']);
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    parseJson();
-    setAudioPlayer(download: false, fileName: '01.mp3');
+
+    setUpSura();
   }
 
   @override
@@ -87,7 +122,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       // user returned to our app
-      this.setAudioPlayer();
+      this.setUpSura();
     } else if (state == AppLifecycleState.inactive) {
       // app is inactive
       _mp.releasePlayer();
@@ -97,16 +132,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
-  Future playVerse(Duration s, Duration e) async {
+  Future playVerse(Duration s, Duration e, {bool continues = false}) async {
     if (_mp.player.playbackState == AudioPlaybackState.playing)
       await _mp.stopAudio();
     setState(() {
       _progressBarActive = true;
     });
-    await _mp.seekToNewPosition(
-      s,
-      e,
-    );
+    _mp.startPosition = s;
+    _mp.endPosition = e;
+    await _mp.seekToNewPosition(continues: continues);
+
     setState(() {
       _progressBarActive = false;
     });
@@ -131,24 +166,37 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               return ListTile(
                 onTap: () async {
                   // Play Arabic
-//                  await _mp.stopAudio();
-                  await playVerse(
-                      verse.arabic_start_time, verse.arabic_end_time);
+                  setState(() {
+                    _currentSelectedVerse = ind;
+                  });
+                  await playVerse(verse.arabic_start_time, verse.urdu_end_time,
+                      continues: true);
+
                   // Play Urdu
-                  await playVerse(verse.urdu_start_time, verse.urdu_end_time);
+//                  await playVerse(verse.urdu_start_time, verse.urdu_end_time);
                 },
                 title: Padding(
                   padding: const EdgeInsets.all(5.0),
                   child: Text(
                     verse.arabic_text,
-                    style: TextStyle(fontSize: 18.0),
+                    style: TextStyle(
+                      fontSize: 18.0,
+                      color: _currentSelectedVerse == ind
+                          ? Colors.blue
+                          : Colors.grey.shade900,
+                    ),
                   ),
                 ),
                 subtitle: Padding(
                   padding: const EdgeInsets.all(5.0),
                   child: Text(
                     verse.urdu_text,
-                    style: TextStyle(fontSize: 18.0),
+                    style: TextStyle(
+                      fontSize: 18.0,
+                      color: _currentSelectedVerse == ind
+                          ? Colors.blue
+                          : Colors.grey.shade900,
+                    ),
                   ),
                 ),
               );

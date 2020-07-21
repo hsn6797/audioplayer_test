@@ -125,10 +125,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       this.setUpSura();
     } else if (state == AppLifecycleState.inactive) {
       // app is inactive
-      _mp.releasePlayer();
+      if(_mp != null) _mp.releasePlayer();
     } else if (state == AppLifecycleState.paused) {
       // user is about quit our app temporally
-      _mp.releasePlayer();
+      if(_mp != null) _mp.releasePlayer();
     }
   }
 
